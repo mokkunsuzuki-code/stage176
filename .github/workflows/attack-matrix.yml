@@ -1,0 +1,38 @@
+name: Attack Matrix CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  attack-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        attack:
+          - attack-01
+          - attack-02
+          - attack-03
+          - attack-04
+          - attack-05
+          - attack-06
+          - demo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & Run attack
+        run: |
+          docker compose -f docker/docker-compose.yml run --rm qsp ${{ matrix.attack }}
+
+      - name: Collect results
+        run: |
+          ./scripts/summarize_results.sh
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: attack-summary
+          path: out/reports/summary.md
+
