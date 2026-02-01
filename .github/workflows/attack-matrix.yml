@@ -31,8 +31,4 @@ jobs:
           ./scripts/summarize_results.sh
 
       - name: Upload summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: attack-summary
-          path: out/reports/summary.md
-
+        uses: actions/upload-a
