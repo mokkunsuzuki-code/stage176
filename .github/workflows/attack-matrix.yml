@@ -1,8 +1,22 @@
+# MIT License © 2025 Motohiro Suzuki
+#
+# Stage177: CI/CD Attack Matrix Auto-Run (service direct run)
+# - Run attack services directly (attack-01..06, demo)
+# - Upload per-case artifacts + a single summary.md artifact
+# - Fail-closed in aggregate
+
 name: Attack Matrix CI
 
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attack-matrix-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   attack-matrix:
@@ -10,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        attack:
+        service:
           - attack-01
           - attack-02
           - attack-03
@@ -20,15 +34,71 @@ jobs:
           - demo
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Build & Run attack
+      - name: Versions
         run: |
-          docker compose -f docker/docker-compose.yml run --rm qsp ${{ matrix.attack }}
+          docker --version
+          docker compose version
 
-      - name: Collect results
+      - name: Prepare output dirs
         run: |
-          ./scripts/summarize_results.sh
+          mkdir -p out/ci/${{ matrix.service }}
 
-      - name: Upload summary
-        uses: actions/upload-a
+      - name: Run ${{ matrix.service }}
+        shell: bash
+        run: |
+          set +e
+          docker compose -f docker/docker-compose.yml run --rm --build \
+            ${{ matrix.service }} \
+            > out/ci/${{ matrix.service }}/stdout.txt \
+            2> out/ci/${{ matrix.service }}/stderr.txt
+          rc=$?
+          set -e
+
+          echo "${rc}" > out/ci/${{ matrix.service }}/exit_code.txt
+          if [ "${rc}" -eq 0 ]; then
+            echo PASS > out/ci/${{ matrix.service }}/result.txt
+          else
+            echo FAIL > out/ci/${{ matrix.service }}/result.txt
+          fi
+
+          # do not fail here; fail-closed in aggregate
+          exit 0
+
+      - name: Upload per-case artifact (${{ matrix.service }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-${{ matrix.service }}
+          path: out/ci/${{ matrix.service }}
+          retention-days: 14
+
+  aggregate:
+    runs-on: ubuntu-latest
+    needs: [attack-matrix]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all per-case artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: _ci_artifacts
+
+      - name: Generate summary.md (fail-closed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/summarize_results.sh
+          ./scripts/summarize_results.sh \
+            --artifacts-dir "_ci_artifacts" \
+            --out "out/reports/summary.md"
+
+      - name: Upload summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: attack-summary
+          path: out/reports/summary.md
+          retention-days: 30
